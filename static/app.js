@@ -618,7 +618,7 @@ views.settings = async () => {
         field(`Google Vision API key ${s.vision_key_set ? "(saved – leave blank to keep)" : ""}`, inp(s, "vision_key", { type: "password", autocomplete: "off" })),
         field("LLM provider", sel(s, "llm_provider", [["xai", "xAI Grok (api.x.ai)"], ["groq", "Groq (api.groq.com)"]])),
         field(`LLM API key ${s.llm_key_set ? "(saved – leave blank to keep)" : ""}`, inp(s, "llm_key", { type: "password", autocomplete: "off" })),
-        field("Model (blank = default: grok-4 / llama-3.3-70b-versatile)", inp(s, "llm_model")))),
+        field("Model (blank = default: grok-4 / openai/gpt-oss-120b)", inp(s, "llm_model")))),
     h("div", { class: "panel" }, h("h2", {}, "Output folder"), field("Generated documents are saved under", inp(s, "output_dir"))),
     h("div", { class: "panel" }, h("h2", {}, "Purchase value rules"),
       h("p", { class: "muted", style: "margin-top:0" }, "Default: up to ₹3,000 → HOD; ₹3,001–10,000 → 3-party comparison, stays with HOD, PO (Tally + normal), no audit; ₹10,001–50,000 → Director, PO + Internal Audit + Outward; above ₹50,000 → VP."),

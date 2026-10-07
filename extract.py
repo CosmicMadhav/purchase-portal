@@ -17,7 +17,7 @@ PROVIDERS = {
     "xai": "https://api.x.ai/v1/chat/completions",
     "groq": "https://api.groq.com/openai/v1/chat/completions",
 }
-DEFAULT_MODELS = {"xai": "grok-4", "groq": "llama-3.3-70b-versatile"}
+DEFAULT_MODELS = {"xai": "grok-4", "groq": "openai/gpt-oss-120b"}
 
 
 # ------------------------------------------------------------------ text
