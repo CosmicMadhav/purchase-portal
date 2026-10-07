@@ -47,7 +47,11 @@ def qty_str(q):
 
 def quote_totals(q, inclusive=False):
     return totals(q.get("items"), q.get("discount"), q.get("gst_override"), q.get("other"),
-                  inclusive=inclusive)
+                  inclusive=inclusive, other_gst=q.get("other_gst"), round_off=q.get("round_off"))
+
+
+def other_label(t):
+    return "Other charges (Round off)" if t.get("round_off") else "Other charges"
 
 
 def selected_quote(p):
@@ -60,7 +64,9 @@ def selected_quote(p):
 
 def subject_lines(p, items):
     """Returns (first line, [extra lines]) the way the existing letters are written."""
-    title = (p.get("title") or "").strip()
+    import re
+    title = re.sub(r"^\s*(subject\s*:\s*)?(permission\s+to\s+purchase|purchase\s+order)(\s+for)?\s*[:\-]?\s*",
+                   "", (p.get("title") or ""), flags=re.I).strip()
     prefix = (p.get("subject_prefix") or "").strip()
     if len(items) > 1 and p.get("list_items_in_subject", True):
         head = title or "Components"
@@ -192,15 +198,17 @@ def build_permission(p, profile, out_path, slabs=None):
         b = DocBuilder(os.path.join(TPL, "permission_hod.docx"))
         I = dict(ref=0, date=1, blank=2, plain=3, subject=5, following=6, table=7, terms_head=8,
                  term=9, term_bold=12, request=13, sign=16, title=17, to=19, line=21)
-        incl = totals(items, q.get("discount"), q.get("gst_override"), q.get("other"))
-        rows = []
+        incl = quote_totals(q)
+        rows, line_sum = [], 0.0
         for n, it in enumerate(items, 1):
-            g = float(it.get("gst") if it.get("gst") not in (None, "") else 18)
-            rate_inc = float(it.get("rate") or 0) * (1 + g / 100)
-            rows.append((f"{n}.", it.get("description", ""), rs(rate_inc), qty_str(it.get("qty")),
-                         rs(rate_inc * float(it.get("qty") or 0))))
-        grand = incl["grand"]
-        summary = [("Total (₹)", rs(grand - incl["other"])), ("Other charges", rs(incl["other"])),
+            g_ = float(it.get("gst") if it.get("gst") not in (None, "") else 18)
+            rate_inc = float(it.get("rate") or 0) * (1 + g_ / 100)
+            line = round(rate_inc * float(it.get("qty") or 0), 2)
+            line_sum += line
+            rows.append((f"{n}.", it.get("description", ""), rs(rate_inc), qty_str(it.get("qty")), rs(line)))
+        line_sum = round(line_sum, 2)
+        grand = round(line_sum + incl["other"], 2)   # printed rows always add up
+        summary = [("Total (₹)", rs(line_sum)), (other_label(incl), rs(incl["other"])),
                    ("Grand Total(approx)", rs(grand))]
     else:
         b = DocBuilder(os.path.join(TPL, "permission_main.docx"))
@@ -213,7 +221,7 @@ def build_permission(p, profile, out_path, slabs=None):
         summary = [("Total (₹)", rs(t0["subtotal"]))]
         if t0["discount"]:
             summary.append(("Discount", rs(t0["discount"])))
-        summary += [("GST", rs(t0["gst"])), ("Other charges", rs(t0["other"])), ("Grand Total", rs(grand))]
+        summary += [("GST", rs(t0["gst"])), (other_label(t0), rs(t0["other"])), ("Grand Total", rs(grand))]
 
     b.p(I["ref"], ref_line(profile, d))
     b.p(I["date"], f"Date: {dmy(d)}")
@@ -355,7 +363,7 @@ def build_po(p, profile, out_path, budget=None, slabs=None):
     summary = [("Total (₹)", rs(t["subtotal"]))]
     if t["discount"]:
         summary.append(("Discount", rs(t["discount"])))
-    summary += [("GST", rs(t["gst"])), ("Other charges", rs(t["other"])), ("Grand Total", rs(t["grand"]))]
+    summary += [("GST", rs(t["gst"])), (other_label(t), rs(t["other"])), ("Grand Total", rs(t["grand"]))]
     fill_item_table(b.table(16), rows, summary)
     b.p(17, "Other terms and conditions:  ")
     b.p(18)

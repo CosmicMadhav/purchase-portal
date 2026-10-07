@@ -303,7 +303,10 @@ def get_file():
     allowed = [base, os.path.abspath(UPLOADS), os.path.abspath(os.path.join(HERE, "data", "output"))]
     if not any(path.startswith(a + os.sep) for a in allowed) or not os.path.exists(path):
         abort(404)
-    return send_file(path, as_attachment=request.args.get("dl") == "1")
+    resp = send_file(path, as_attachment=request.args.get("dl") == "1", conditional=False, etag=False,
+                     last_modified=None, max_age=0)
+    resp.headers["Cache-Control"] = "no-store, max-age=0"   # always the latest regenerated file
+    return resp
 
 
 @app.post("/api/open-folder")
@@ -471,8 +474,11 @@ def scan():
         res["quote"] = {
             "vendor": {**(match or {}), **{k: v2 for k, v2 in v.items() if v2}} if match else v,
             "quote_no": d.get("quote_no", ""), "quote_date": d.get("quote_date", ""),
-            "items": items, "discount": d.get("discount") or 0, "other": d.get("other") or 0,
-            "gst_override": d.get("gst_total") or "", "payment": d.get("payment", ""),
+            "items": items, "scanned_items": [dict(i) for i in items],
+            "discount": d.get("discount") or 0, "other": d.get("other") or 0,
+            "other_gst": d.get("other_gst") or 0, "round_off": d.get("round_off") or 0,
+            "gst_override": "", "scanned_grand": d.get("grand_total") or "",
+            "scanned_gst": d.get("gst_total") or "", "payment": d.get("payment", ""),
             "delivery": d.get("delivery", ""), "file": path,
         }
         if match:

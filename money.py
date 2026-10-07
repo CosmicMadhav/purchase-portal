@@ -72,26 +72,32 @@ def words(amount) -> str:
     return " ".join(parts) + " only"
 
 
-def totals(items, discount=0, gst_override=None, other=0, inclusive=False):
-    """Compute subtotal / gst / grand total for a list of items.
+def totals(items, discount=0, gst_override=None, other=0, inclusive=False, other_gst=0, round_off=0):
+    """Subtotal / GST / other / grand total for one quotation.
 
-    items: [{description, qty, rate, gst}]  rate excludes GST unless inclusive=True.
+    items: [{description, qty, rate, gst}] – rate excludes GST (unless inclusive=True).
+    other: shipping / packing etc. before GST; other_gst: GST % charged on it.
+    round_off: the vendor's rounding (e.g. -0.24), not taxed.
+    Every part is rounded to paise first and the grand total is the sum of the rounded parts,
+    so Total + GST + Other charges always equals Grand Total on the printed documents.
     """
     sub = 0.0
-    gst = 0.0
+    gst_items = 0.0
     for it in items or []:
-        q = float(it.get("qty") or 0)
-        rate = float(it.get("rate") or 0)
-        line = q * rate
+        line = r2(float(it.get("qty") or 0) * float(it.get("rate") or 0))
         sub += line
         if not inclusive:
-            gst += line * float(it.get("gst") if it.get("gst") not in (None, "") else 18) / 100
-    discount = float(discount or 0)
+            g = it.get("gst")
+            gst_items += line * (18.0 if g in (None, "") else float(g)) / 100
+    sub = r2(sub)
+    discount = r2(discount or 0)
     if sub and discount and not inclusive:
-        gst = gst * (sub - discount) / sub
+        gst_items = gst_items * (sub - discount) / sub
+    other = r2(other or 0)
+    gst = r2(gst_items + other * float(other_gst or 0) / 100)
     if gst_override not in (None, ""):
-        gst = float(gst_override)
-    other = float(other or 0)
-    grand = sub - discount + gst + other
-    return {"subtotal": r2(sub), "discount": r2(discount), "gst": r2(gst),
-            "other": r2(other), "grand": r2(grand)}
+        gst = r2(gst_override)
+    other_total = r2(other + float(round_off or 0))
+    grand = r2(sub - discount + gst + other_total)
+    return {"subtotal": sub, "discount": discount, "gst": gst, "other": other_total,
+            "shipping": other, "round_off": r2(round_off or 0), "grand": grand}

@@ -64,22 +64,26 @@ async function busy(btn, fn) {
   const old = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spin"></span> ' + old;
   try { return await fn(); } catch (e) { toast(e.message, true); } finally { btn.disabled = false; btn.innerHTML = old; }
 }
-function lineTotals(q) {
+const r2 = (x) => Math.round((Number(x) + Number.EPSILON) * 100) / 100;
+function lineTotals(q) {   // same rules as money.totals on the server
   let sub = 0, gst = 0;
   for (const it of q.items || []) {
-    const l = num(it.qty) * num(it.rate); sub += l;
-    gst += l * (it.gst === "" || it.gst === undefined ? 18 : num(it.gst)) / 100;
+    const l = r2(num(it.qty) * num(it.rate)); sub += l;
+    gst += l * (it.gst === "" || it.gst === undefined || it.gst === null ? 18 : num(it.gst)) / 100;
   }
-  const disc = num(q.discount);
+  sub = r2(sub);
+  const disc = r2(num(q.discount));
   if (sub && disc) gst = gst * (sub - disc) / sub;
-  if (q.gst_override !== "" && q.gst_override !== undefined && q.gst_override !== null) gst = num(q.gst_override);
-  const other = num(q.other);
-  return { sub, disc, gst, other, grand: sub - disc + gst + other };
+  const ship = r2(num(q.other));
+  gst = r2(gst + ship * num(q.other_gst) / 100);
+  if (q.gst_override !== "" && q.gst_override !== undefined && q.gst_override !== null) gst = r2(num(q.gst_override));
+  const other = r2(ship + num(q.round_off));
+  return { sub, disc, gst, other, grand: r2(sub - disc + gst + other) };
 }
 function fileLinks(doc) {
   return doc.files.map((f) => {
     const ext = f.split(".").pop().toUpperCase();
-    return h("a", { onclick: () => window.open("/api/file?path=" + encodeURIComponent(f)) }, ext);
+    return h("a", { onclick: () => window.open("/api/file?path=" + encodeURIComponent(f) + "&v=" + encodeURIComponent(doc.made)) }, ext);
   }).concat(S.settings.can_open_folder ? [h("a", { onclick: () => api("/api/open-folder", { method: "POST", body: { path: doc.files[0] } }) }, "Folder")] : []);
 }
 const DOC_NAMES = { permission: "Purchase Permission", po: "Purchase Order", rfq: "Quotation requests",
@@ -231,8 +235,21 @@ views["purchase-edit"] = async (id) => {
   function quoteCard(q, qi) {
     q.vendor = q.vendor || { name: "" };
     const totBox = h("div", { class: "tot" });
+    const warnBox = h("div");
     const updTot = () => {
       const t = lineTotals(q);
+      warnBox.innerHTML = "";
+      if (q.scanned_grand && Math.abs(num(q.scanned_grand) - t.grand) > 1)
+        warnBox.append(h("div", { class: "note", style: "margin-top:8px" }, `The scanned quotation's total is ${inr(q.scanned_grand)} but these figures give ${inr(t.grand)}. Check quantities, rates, shipping GST or round off.`));
+      if (q.scanned_items && q.scanned_items.length) {
+        const key = (i) => `${String(i.description || "").trim().toLowerCase()}|${num(i.qty)}|${num(i.rate)}`;
+        const quoted = new Set(q.scanned_items.map(key));
+        const extra = (q.items || []).filter((i) => i.description && !quoted.has(key(i)));
+        if (extra.length)
+          warnBox.append(h("div", { class: "note", style: "margin-top:8px" }, `Not as in ${(q.vendor || {}).name || "this vendor"}'s uploaded quotation: ${extra.map((i) => i.description).join(", ")}. Get a revised quotation from the vendor (use "Quotation request letters") and scan it in.`));
+      }
+      if (q.gst_override !== "" && q.gst_override !== undefined && q.gst_override !== null)
+        warnBox.append(h("div", { class: "note", style: "margin-top:8px" }, "GST is fixed by the override – it will NOT change if you edit items."));
       totBox.innerHTML = "";
       totBox.append(h("div", {}, "Total", h("b", {}, inr(t.sub - t.disc))), h("div", {}, "GST", h("b", {}, inr(t.gst))),
         h("div", {}, "Other", h("b", {}, inr(t.other))), h("div", {}, "Grand total", h("b", {}, inr(t.grand))));
@@ -300,9 +317,14 @@ views["purchase-edit"] = async (id) => {
         field("Payment condition", inp(q, "payment", { placeholder: "e.g. After 15 days of purchase" })), field("Delivery time", inp(q, "delivery", { placeholder: "e.g. 7-10 working days" }))),
       h("div", { style: "margin-top:8px" }, itemsTbl,
         h("button", { class: "small", style: "margin-top:6px", onclick: () => { q.items.push({ description: "", qty: 1, rate: "", gst: 18 }); drawItems(); } }, "+ Item")),
-      h("div", { class: "grid g3", style: "margin-top:8px" }, field("Discount (₹)", inp(q, "discount", { type: "number", step: "any" }, changed)),
-        field("Other charges (₹, incl. shipping)", inp(q, "other", { type: "number", step: "any" }, changed)),
-        field("GST amount override (₹)", inp(q, "gst_override", { type: "number", step: "any", placeholder: "auto" }, changed))),
+      h("div", { class: "grid g4", style: "margin-top:8px" }, field("Discount (₹)", inp(q, "discount", { type: "number", step: "any" }, changed)),
+        field("Shipping / other (₹, before GST)", inp(q, "other", { type: "number", step: "any" }, changed)),
+        field("GST % on shipping", inp(q, "other_gst", { type: "number", step: "any", placeholder: "0" }, changed)),
+        field("Round off (₹)", h("div", { class: "row", style: "gap:4px;flex-wrap:nowrap" }, inp(q, "round_off", { type: "number", step: "any", placeholder: "0" }, changed),
+          h("button", { class: "small", title: "Round grand total to the nearest rupee", onclick: () => { q.round_off = 0; const t = lineTotals(q); q.round_off = r2(Math.round(t.grand) - t.grand); renderQuotes(); debounceRules(); } }, "₹")))),
+      h("details", {}, h("summary", { style: "font-size:12px" }, "GST override (only if the vendor's GST differs)"),
+        field("GST amount override (₹) – leave empty to calculate", inp(q, "gst_override", { type: "number", step: "any", placeholder: "auto" }, changed))),
+      warnBox,
       q.file ? h("p", { class: "muted", style: "margin:6px 0 0" }, "Source file: ", h("a", { href: "/api/file?path=" + encodeURIComponent(q.file), target: "_blank" }, q.file.split(/[\\/]/).pop())) : null,
       totBox);
   }

@@ -67,6 +67,8 @@ QUOTE_SCHEMA = """{
   "items": [{"description": "", "hsn": "", "qty": 0, "rate": 0, "gst": 18}],
   "discount": 0,
   "other": 0,
+  "other_gst": 0,
+  "round_off": 0,
   "gst_total": 0,
   "grand_total": 0,
   "payment": "payment terms, short",
@@ -88,7 +90,8 @@ def _prompt(kind, text):
     else:
         rules = ("This is a supplier quotation / proforma invoice sent to Nirma University. The vendor is the "
                  "SELLER, never Nirma University. 'rate' is the unit price BEFORE GST. 'gst' is the GST percent. "
-                 "Put shipping/packing/delivery charges in 'other' (before GST), not as an item. "
+                 "Put shipping/packing/delivery charges in 'other' (before GST), not as an item, and the GST percent "
+                 "charged on them in 'other_gst' (0 if not taxed). 'round_off' is the rounding line (e.g. -0.24). "
                  "If prices already include GST, convert rate back to the pre-GST value. 'gst_total' is the total "
                  "tax amount, 'grand_total' the final payable amount.")
         schema = QUOTE_SCHEMA
