@@ -148,8 +148,14 @@ def heuristic(kind, text):
     gsts = [g for g in GSTIN.findall(text) if g != NIRMA_GST]
     amounts = [_num(a) for a in re.findall(r"(?:Total|TOTAL|Grand Total|Amount)[^\d\n]{0,25}([\d,]+\.?\d*)", text)]
     grand = max(amounts) if amounts else 0
-    no = re.search(r"(?:Quotation|Invoice|Proforma Invoice|Bill|PI)\s*(?:No\.?|#|Number)?\s*[:#]?\s*([A-Z0-9][\w/-]{2,})",
-                   text, re.I)
+    # a document number: on the same line as the label, and containing at least one digit
+    no = None
+    for pat in (r"(?:Quotation|Invoice|Proforma Invoice|Bill|Order|PI)[ \t]*(?:No\.?|#|Number)[ \t]*[:#.]?[ \t]*([A-Z0-9][\w/-]*\d[\w/-]*)",
+                r"(?:Quotation|Invoice|Bill)[ \t]*[:#][ \t]*([A-Z0-9][\w/-]*\d[\w/-]*)",
+                r"(?:Quotation|Invoice)[^\n]{0,15}?\b([A-Z]{2,}\w*[/-][\w/-]*\d[\w/-]*)"):
+        no = re.search(pat, text, re.I)
+        if no:
+            break
     dt = re.search(r"(?:Date|Dated)\s*[:.]?\s*([^\n]{6,20})", text, re.I)
     first_line = next((l.strip() for l in text.splitlines() if len(l.strip()) > 3), "")
     if kind == "bill":

@@ -43,3 +43,10 @@ are read with a basic reader (vendor via GSTIN, quote no., date).
 `data/portal.db` (SQLite; vendors, items, purchases, keys). Delete it to re-seed from scratch.
 Budget "utilized" = opening amount (Settings → project) + approved PO/card purchases + adjustment vouchers +
 cash vouchers + manual entries.
+
+## Tests
+`python -m pytest tests` — 104 tests: money/rules (checked against 10 real past documents), every
+document type and edge case, the API (workflow locks, budget, key/file security, scanning), real PDF
+export, and browser tests (Playwright + Edge) at desktop and phone width. Inside Docker:
+`docker run --rm ghcr.io/cosmicmadhav/purchase-portal sh -c "pip install pytest && python -m pytest tests --ignore=tests/test_ui.py"`.
+Tests always use a temporary database, never `data/`.
