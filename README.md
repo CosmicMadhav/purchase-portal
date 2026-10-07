@@ -45,7 +45,7 @@ Budget "utilized" = opening amount (Settings → project) + approved PO/card pur
 cash vouchers + manual entries.
 
 ## Tests
-`python -m pytest tests` — 104 tests: money/rules (checked against 10 real past documents), every
+`python -m pytest tests` — 108 tests: money/rules (checked against 10 real past documents), every
 document type and edge case, the API (workflow locks, budget, key/file security, scanning), real PDF
 export, and browser tests (Playwright + Edge) at desktop and phone width. Inside Docker:
 `docker run --rm ghcr.io/cosmicmadhav/purchase-portal sh -c "pip install pytest && python -m pytest tests --ignore=tests/test_ui.py"`.

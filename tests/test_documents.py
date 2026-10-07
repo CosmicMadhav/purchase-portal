@@ -239,3 +239,38 @@ def test_cash_voucher(tmp_path, profile):
     assert ws["D5"].value == "CASH VOUCHER" and ws["G9"].value == 2950
     assert ws["B34"].value == "HYDRO – Wheel hub" and ws["H35"].value == 2950
     assert ws["G13"].value == "Permission dated 27-06-2026"
+
+
+# ---------------------------------------------------------------- post-facto and waiver
+from gen_word import build_waiver  # noqa: E402
+
+
+def test_post_facto_permission(tmp_path, profile):
+    q = quote("GROWIT INDIA PVT LTD", [("GROWIT SOIL GURU PRO", 1, 30508)], round_off=0.56)
+    p = {"date": "2026-01-01", "title": "GROWIT SOIL GURU PRO (WITHOUT SUBCRIPTION)", "quotes": [q], "post_facto": True,
+         "justification": "Sensors were running out of stock."}
+    out = build_permission(p, profile, str(tmp_path / "pf.docx"))
+    t = text(out)
+    assert "Justification for purchase without prior Permission:" in t and "Sensors were running out of stock." in t
+    assert "post facto approval" in t and "Total cost of purchase: ₹ 36,000.00" in t
+    assert "Supplier Details: GROWIT INDIA PVT LTD" in t and "Through" in t          # 36k -> Director route
+    assert table_rows(out, 0)[-1] == ["Grand Total", "Rs. 36,000.00"]
+    assert " Statement" in t
+
+
+def test_post_facto_default_justification(tmp_path, profile):
+    p = {"date": "2026-01-01", "title": "x", "quotes": [quote("A", [("x", 1, 100)])], "post_facto": True}
+    assert "personal funds" in text(build_permission(p, profile, str(tmp_path / "pf2.docx")))
+
+
+def test_waiver(tmp_path, profile):
+    rec = {"date": "2026-01-15", "waiver_reason": "Urgent need during integration.",
+           "bills": [{"biller": "Growit India Private Limited", "items": "Soil Guru Pro", "amount": 36000, "bill_no": "CKD-00049", "bill_date": "2025-12-27"},
+                     {"biller": "Robu", "items": "Motor driver", "amount": 28695.99, "bill_no": "INV/1", "bill_date": "2025-12-08"}]}
+    out = build_waiver(rec, profile, str(tmp_path / "w.docx"))
+    t = text(out)
+    assert "Date :   15  / 1  / 26" in t and "Urgent need during integration." in t and "Vice President" in t
+    rows = table_rows(out, 0)
+    assert len(rows) == 3
+    assert rows[1][1] == "GROWIT INDIA PRIVATE LIMITED" and rows[1][3] == "36,000" and "27/12/25" in rows[1][4]
+    assert rows[2][3] == "28,695.99"

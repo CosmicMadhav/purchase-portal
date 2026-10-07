@@ -102,7 +102,7 @@ function lineTotals(q) {   // same rules as money.totals on the server
   return { sub, disc, gst, other, grand: r2(sub - disc + gst + other) };
 }
 const DOC_NAMES = { permission: "Purchase Permission", po: "Purchase Order", rfq: "Quotation request letters",
-  advance_voucher: "Advance Voucher", advance_adjustment: "Advance Adjustment Voucher", cash_voucher: "Cash Voucher" };
+  advance_voucher: "Advance Voucher", advance_adjustment: "Advance Adjustment Voucher", cash_voucher: "Cash Voucher", waiver: "Waiver form" };
 function docsList(rec) {
   if (!rec.docs || !rec.docs.length) return h("p", { class: "muted small-t", style: "margin:0" }, "Generated files will appear here.");
   const base = (f) => f.split(/[\\/]/).pop();
@@ -398,7 +398,7 @@ views["purchase-edit"] = async (id) => {
   }
   function renderDocs() {
     const proj = projById(p.project_id);
-    const bPerm = h("button", { class: "primary", "data-t": "gen-permission", onclick: () => gen("permission", bPerm) }, "Make Purchase Permission");
+    const bPerm = h("button", { class: "primary", "data-t": "gen-permission", onclick: () => gen("permission", bPerm) }, p.post_facto ? "Make Post-facto Permission" : "Make Purchase Permission");
     const bPo = h("button", { "data-t": "gen-po", onclick: () => gen("po", bPo) }, "Make Purchase Order");
     const bRfq = h("button", { "data-t": "gen-rfq", onclick: () => gen("rfq", bRfq) }, "Make quotation request letters");
     docsBox.replaceChildren(h("div", { class: "gen" }, bPerm, proj.letter_style !== "incubation" ? [bPo, bRfq] : null), h("div", { style: "margin-top:12px" }, docsList(p)));
@@ -420,6 +420,13 @@ views["purchase-edit"] = async (id) => {
     }));
   }
 
+  const postFactoBox = h("div");
+  const drawPostFacto = () => postFactoBox.replaceChildren(p.post_facto
+    ? h("div", { style: "margin-top:10px" }, field("Justification for buying without prior permission",
+        autoGrow(area(p, "justification", { rows: 3, placeholder: "Why it had to be bought before approval (deadline, stock running out…). Leave blank for the standard wording.", "data-t": "justification" }, touch))),
+        h("div", { class: "note info" }, "The letter becomes a post-facto approval request. Fewer than 3 quotations are allowed; attach a Waiver form from the reimbursement if the procedure was not followed."))
+    : "");
+  drawPostFacto();
   const nirmaCard = "The payment may please be made directly to the vendor using the NU WiFi Card (Nirma Card) at the time of purchase. No purchase order or reimbursement process is required, as the payment will be executed directly through the Nirma Card to the vendor.";
   const extraBox = h("div");
   const drawExtra = () => extraBox.replaceChildren(p.extra_paragraphs && p.extra_paragraphs.length
@@ -442,6 +449,8 @@ views["purchase-edit"] = async (id) => {
             field("Grant", sel(p, "project_id", projOptions(), () => { touch(); renderDocs(); debounceRules(); }))),
           h("div", { class: "grid g4", style: "margin-top:12px" },
             field("How it will be paid", sel(p, "route", Object.entries(ROUTES), () => { touch(); debounceRules(); }), null, "span2")),
+          h("div", { style: "margin-top:14px" }, chk(p, "post_facto", "Already bought without permission: ask for post-facto approval", () => { touch(); drawPostFacto(); renderDocs(); })),
+          postFactoBox,
           h("details", { class: "more", style: "margin-top:14px" }, h("summary", {}, "Letter wording and order terms"),
             h("div", { class: "grid g3" },
               field("Payment condition in letter", inp(p, "payment_condition", { placeholder: "From the selected quotation" }, touch)),
@@ -608,6 +617,7 @@ views["reimbursement-edit"] = async (id) => {
   const save = async (silent) => { const fresh = !c.id; c = await api("/api/reimbursements", { method: "POST", body: c }); dirty = false; if (!silent) toast("Saved"); if (fresh) history.replaceState(null, "", "#reimbursement-edit/" + c.id); docsBox.replaceChildren(docsList(c)); };
   const st = stepsEditor("reimbursements", () => c, (r) => (c = r), S.cvDefs, async () => { if (!c.id) await save(true); });
   const bGen = h("button", { class: "primary", "data-t": "gen-cv", onclick: () => busy(bGen, async () => { await save(true); c = await api(`/api/generate/cash_voucher/${c.id}`, { method: "POST", body: {} }); toast("Cash Voucher ready"); docsBox.replaceChildren(docsList(c)); st.draw(); }) }, "Make Cash Voucher");
+  const bWaiver = h("button", { "data-t": "gen-waiver", onclick: () => busy(bWaiver, async () => { await save(true); c = await api(`/api/generate/waiver/${c.id}`, { method: "POST", body: {} }); toast("Waiver form ready"); docsBox.replaceChildren(docsList(c)); }) }, "Make Waiver form");
   docsBox.append(docsList(c));
   const permOpts = [["", "Choose the approved permission"]].concat(purchases.map((p) => [String(p.id), `${dmy(p.date)}  ${p.title || "Untitled"}  ${inr(p.amount)}${(p.stages || {}).permission_approved ? "" : "  (not approved yet)"}`]));
   main.append(vendorDatalist(),
@@ -626,7 +636,10 @@ views["reimbursement-edit"] = async (id) => {
           h("div", { class: "grid g2", style: "margin-top:12px" }, field("Pay to", inp(c, "payee", { placeholder: "Grant default" }, () => { dirty = true; })),
             field("Being payment of", inp(c, "purpose", { placeholder: "Reimbursement of material purchased…" }, () => { dirty = true; })))),
         h("section", { class: "sheet" }, h("header", {}, h("h2", {}, "Original bills")), billsEditor(c),
-          h("div", { class: "row", style: "margin-top:12px" }, h("p", { class: "muted small-t grow", style: "margin:0" }, "There was no official Cash Voucher format in your files, so this uses the Nirma voucher sheet titled Cash Voucher."), bGen))),
+          h("div", { class: "row", style: "margin-top:12px" }, h("p", { class: "muted small-t grow", style: "margin:0" }, "There was no official Cash Voucher format in your files, so this uses the Nirma voucher sheet titled Cash Voucher."), bGen)),
+        h("section", { class: "sheet" }, h("header", {}, h("h2", {}, "Waiver of purchase procedure"), h("p", {}, "Only if the purchase was made without permission, quotations or PO. Lists the bills above and goes to the Vice President.")),
+          field("Reason the procedure was not followed", autoGrow(area(c, "waiver_reason", { rows: 4, placeholder: "Leave blank for the standard wording.", "data-t": "waiver-reason" }, () => { dirty = true; }))),
+          h("div", { class: "row", style: "margin-top:12px" }, h("span", { class: "grow" }), bWaiver))),
       sideRail(["Documents", docsBox], ["Progress", st.el])));
 };
 
@@ -701,6 +714,8 @@ views.settings = async () => {
         field("AI service", sel(s, "llm_provider", [["groq", "Groq (key starts with gsk_)"], ["xai", "xAI Grok (key starts with xai-)"]])),
         field("AI key", inp(s, "llm_key", { type: "password", autocomplete: "off", placeholder: s.llm_key_set ? "Saved. Type to replace" : "Not set" })),
         field("Model", inp(s, "llm_model", { placeholder: "Default: openai/gpt-oss-120b (Groq), grok-4 (xAI)" })))),
+    h("section", { class: "sheet" }, h("header", {}, h("h2", {}, "Backup"), h("p", {}, "Everything lives on this computer. Download a backup now and then (database, keys, all generated documents) and keep it on Drive or a pen drive. To restore, unzip it into the portal folder.")),
+      h("a", { href: "/api/backup", "data-t": "backup" }, h("button", { class: "primary" }, "Download backup"))),
     h("section", { class: "sheet" }, h("header", {}, h("h2", {}, "Where files are saved")),
       s.output_fixed ? h("p", { style: "margin:0" }, "Running in Docker: files go to the portal's data/output folder on this computer.") : field("Folder", inp(s, "output_dir"))),
     h("section", { class: "sheet" }, h("header", {}, h("h2", {}, "Purchase value rules"), h("p", {}, "Which signatures, how many quotations and which papers each amount needs.")),

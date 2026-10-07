@@ -171,6 +171,8 @@ def _approval_block(b, profile, authority, idx):
 
 # ---------------------------------------------------------------- permission
 def build_permission(p, profile, out_path, slabs=None):
+    if p.get("post_facto"):
+        return build_post_facto(p, profile, out_path, slabs)
     if profile.get("letter_style") == "incubation":
         return build_permission_incubation(p, profile, out_path)
 
@@ -445,5 +447,115 @@ def build_rfq(p, profile, vendor, out_path):
     b.p(28, profile.get("mentor_name", ""))
     b.p(28, profile.get("mentor_title", ""))
     b.p(29, f"{profile.get('institute', 'Institute of Technology')}, Nirma University, S G Highway, Ahmedabad")
+    b.save(out_path)
+    return out_path
+
+
+# ---------------------------------------------------------------- post-facto permission
+DEFAULT_JUSTIFICATION = ("Due to the urgent requirement of the item for the project and the strict project deadline, it "
+                         "became necessary to procure it immediately. Since prior approval could not be obtained within "
+                         "the required timeframe, the purchase was made using personal funds to ensure uninterrupted "
+                         "progress and timely completion of the project.")
+
+
+def build_post_facto(p, profile, out_path, slabs=None):
+    """Permission asked for after the purchase (format of 'Post facto for Sensor')."""
+    q = selected_quote(p)
+    items = q.get("items") or []
+    quotes = p.get("quotes") or []
+    sel = int(p.get("selected") or 0)
+    ordered = ([quotes[sel]] + [x for i, x in enumerate(quotes) if i != sel]) if quotes else [q]
+    t = quote_totals(q)
+    authority = p.get("authority_override") or slab_for(t["grand"], slabs)["authority"]
+    vendor = q.get("vendor") or {}
+    d = p.get("date")
+    first, extra = subject_lines(p, items)
+    b = DocBuilder(os.path.join(TPL, "post_facto.docx"))
+    b.p(0, ref_line(profile, d))
+    b.p(1, f"Date: {dmy(d)}")
+    b.p(2)
+    b.p(3, "Submitted")
+    b.p(4)
+    b.p(5, f"Subject: Permission to purchase for {first}")
+    for line in extra:
+        b.p(5, line)
+    b.p(6)
+    b.p(7, f"Following items are required to be procured for {profile.get('project', '')} ({profile.get('grant', '')}).")
+    b.p(8)
+    rows = [(str(n), it.get("description", ""), rs(it.get("rate")), qty_str(it.get("qty")),
+             rs(float(it.get("rate") or 0) * float(it.get("qty") or 0))) for n, it in enumerate(items, 1)]
+    summary = [("Total (₹)", rs(t["subtotal"]))]
+    if t["discount"]:
+        summary.append(("Discount", rs(t["discount"])))
+    summary += [("GST", rs(t["gst"])), (other_label(t), rs(t["other"])), ("Grand Total", rs(t["grand"]))]
+    fill_item_table(b.table(9), rows, summary)
+    b.p(10)
+    b.p(11, [("Total cost of purchase: ₹ " + indian(t["grand"]), True)])
+    if vendor.get("name"):
+        b.p(12, f"Supplier Details: {vendor['name']}")
+    b.p(13, [("Budget head: ", False), (profile.get("budget_code", ""), True)])
+    b.p(14)
+    b.p(15, "Justification for purchase without prior Permission:")
+    b.p(16)
+    b.p(17, (p.get("justification") or DEFAULT_JUSTIFICATION).strip())
+    b.p(18)
+    b.p(19, "It is kindly requested to approve the same as a post facto approval")
+    b.p(20)
+    b.p(21)
+    b.p(22, profile.get("mentor_name", ""))
+    b.p(23, profile.get("mentor_title", ""))
+    _approval_block(b, profile, authority, dict(blank=25, to=26, line=29))
+    if len(ordered) >= 1 and (len(ordered) > 1 or p.get("post_facto_statement", True)):
+        single = len(ordered) == 1
+        b.p(36, " Statement" if single else "Comparative Statement", page_break_before=True)
+        b.p(37)
+        fill_comparative(b.table(38), ordered)
+        b.p(39)
+        b.p(40, [(f"It is {'requested' if single else 'recommended'} to purchase the item from ", False),
+                 (vendor.get("name", "").rstrip(".") + ".", True)])
+        b.p(41)
+        b.p(42)
+        b.p(44, profile.get("mentor_name", ""))
+        b.p(45, profile.get("mentor_title", ""))
+    b.save(out_path)
+    return out_path
+
+
+# ---------------------------------------------------------------- waiver of procedure
+DEFAULT_WAIVER_REASON = ("The procurement of the listed items arose during an active development and integration phase of "
+                         "the project, where uninterrupted progress was essential to meet predefined milestones. In order "
+                         "to prevent a halt in development and testing activities, the items were procured promptly from "
+                         "the available source using personal funds. The procurement was undertaken solely in good faith "
+                         "for academic and project-related purposes.")
+
+
+def build_waiver(rec, profile, out_path):
+    """Waiver of the prescribed purchase procedure (format '04.Wiver Form_Format').
+    rec: {date, waiver_reason, bills:[{biller, items, amount, bill_no, bill_date}]}"""
+    d = parse_date(rec.get("date"))
+    b = DocBuilder(os.path.join(TPL, "waiver.docx"))
+    b.p(0)
+    b.p(1, [(f"Date :   {d.day}  / {d.month}  / {d.year % 100:02d}", True)])
+    for i in range(2, 14):
+        b.p(i)
+    b.p(14, [((rec.get("waiver_reason") or DEFAULT_WAIVER_REASON).strip(), False, True)])
+    b.p(15, [("\nDetails of which are as under :", False, False)])
+    b.p(16)
+    tbl = b.table(17)
+    trs = list(tbl.rows)
+    proto, anchor = trs[1], trs[0]
+    for n, bill in enumerate(rec.get("bills") or [], 1):
+        nr = clone_row_after(tbl, proto, anchor)
+        c = unique_cells(nr)
+        set_cell(c[0], f"\n{n}.")
+        set_cell(c[1], (bill.get("biller") or "").upper())
+        set_cell(c[2], (bill.get("items") or "").upper())
+        set_cell(c[3], indian(bill.get("amount") or 0, 0 if float(bill.get("amount") or 0).is_integer() else 2))
+        bd = parse_date(bill["bill_date"]).strftime("%d/%m/%y") if bill.get("bill_date") else ""
+        set_cell(c[4], f"{bill.get('bill_no', '')}\n\n{bd}")
+        anchor = nr
+    remove_row(proto)
+    for i in range(18, 32):
+        b.p(i)
     b.save(out_path)
     return out_path

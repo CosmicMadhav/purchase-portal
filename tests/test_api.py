@@ -231,3 +231,22 @@ def test_vision_error_never_leaks_key(monkeypatch):
     with pytest.raises(RuntimeError) as e:
         extract.vision_ocr(b"img", "AIzaSECRET")
     assert "AIzaSECRET" not in str(e.value) and "billing disabled" in str(e.value)
+
+
+def test_post_facto_allows_fewer_quotes_and_waiver_and_backup(app_client):
+    import zipfile
+    p = purchase(app_client, amount_rates=(5000,), post_facto=True, justification="urgent")
+    r = app_client.post(f"/api/generate/permission/{p['id']}", json={})
+    assert r.status_code == 200 and "Post-facto Permission" in r.get_json()["docs"][0]["files"][0]
+    pid = store.all_("projects", "id ASC")[0]["id"]
+    c = app_client.post("/api/reimbursements", json={"project_id": pid, "date": "2026-10-07", "title": "W"}).get_json()
+    assert app_client.post(f"/api/generate/waiver/{c['id']}", json={}).status_code == 400
+    c["bills"] = [{"biller": "Hydro", "items": "Hub", "amount": 2950, "bill_no": "T/1", "bill_date": "2026-10-01"}]
+    app_client.post("/api/reimbursements", json=c)
+    r = app_client.post(f"/api/generate/waiver/{c['id']}", json={})
+    assert r.status_code == 200 and r.get_json()["docs"][0]["kind"] == "waiver"
+    z = app_client.get("/api/backup")
+    assert z.status_code == 200 and z.mimetype == "application/zip"
+    import io
+    names = zipfile.ZipFile(io.BytesIO(z.data)).namelist()
+    assert "data/portal.db" in names and any(n.endswith(".pdf") for n in names)

@@ -12,7 +12,7 @@ from flask import Flask, jsonify, request, send_file, send_from_directory, abort
 import store
 from rules import requirements, slab_for, applicable_stages, can_mark, STAGES, AUTHORITY_NAMES
 from money import totals, r2
-from gen_word import build_permission, build_po, build_rfq, selected_quote, quote_totals, dmy
+from gen_word import build_permission, build_po, build_rfq, build_waiver, selected_quote, quote_totals, dmy
 from gen_excel import build_advance_voucher, build_advance_adjustment, build_cash_voucher
 from convert import docx_to_pdf
 import extract
@@ -352,12 +352,13 @@ def generate(kind, id_):
         stages = p.setdefault("stages", {})
 
         if kind == "permission":
-            if proj.get("letter_style") != "incubation" and nq < int(slab["quotes"]) and not p.get("quote_waiver"):
+            if (proj.get("letter_style") != "incubation" and nq < int(slab["quotes"]) and not p.get("quote_waiver")
+                    and not p.get("post_facto")):
                 return err(f"This amount (Rs. {t['grand']:,.2f}) needs {slab['quotes']} quotations – "
                            f"you have {nq}. Add the quotations (or tick 'single source / waiver' if that "
                            f"applies).", 409)
-            path = build_permission(p, proj, os.path.join(folder, fname("Purchase Permission", p.get("title")) + ".docx"),
-                                    s["slabs"])
+            label = "Post-facto Permission" if p.get("post_facto") else "Purchase Permission"
+            path = build_permission(p, proj, os.path.join(folder, fname(label, p.get("title")) + ".docx"), s["slabs"])
             pdf = docx_to_pdf(path)
             p = _push_doc("purchases", p, file_entry("permission", path, pdf))
             p.setdefault("stages", {})
@@ -443,7 +444,52 @@ def generate(kind, id_):
         c.setdefault("stages", {}).setdefault("voucher_made", date.today().isoformat())
         return jsonify(store.save("reimbursements", c))
 
+    if kind == "waiver":
+        c = store.get("reimbursements", id_)
+        if not c:
+            return err("Save the reimbursement first", 404)
+        if not c.get("bills"):
+            return err("Add the bills the waiver is for.", 400)
+        proj = _project(c)
+        folder = out_dir(proj, fname("Reimbursement", dmy(c.get("date")), c.get("title")))
+        path = build_waiver(c, proj, os.path.join(folder, fname("Waiver", c.get("title")) + ".docx"))
+        pdf = docx_to_pdf(path, smart_page_break=False)
+        c = _push_doc("reimbursements", c, file_entry("waiver", path, pdf))
+        return jsonify(store.save("reimbursements", c))
+
     return err("Unknown document type", 404)
+
+
+# ------------------------------------------------------------------ backup
+@app.get("/api/backup")
+def backup():
+    """One zip with the database (incl. keys), private details and every generated document."""
+    import io
+    import sqlite3
+    import tempfile
+    import zipfile
+    buf = io.BytesIO()
+    with tempfile.TemporaryDirectory() as tmp:
+        snap = os.path.join(tmp, "portal.db")
+        src = sqlite3.connect(store.DB)
+        dst = sqlite3.connect(snap)
+        src.backup(dst)          # consistent copy even while the portal is running
+        dst.close()
+        src.close()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(snap, "data/portal.db")
+            priv = os.path.join(os.path.dirname(store.DB), "private_seed.json")
+            if os.path.exists(priv):
+                z.write(priv, "data/private_seed.json")
+            base = output_base()
+            for root, _, files in os.walk(base):
+                for f in files:
+                    full = os.path.join(root, f)
+                    z.write(full, os.path.join("data", "output", os.path.relpath(full, base)))
+    buf.seek(0)
+    from datetime import datetime
+    return send_file(buf, mimetype="application/zip", as_attachment=True,
+                     download_name=f"purchase-portal-backup-{datetime.now():%Y-%m-%d}.zip")
 
 
 # ------------------------------------------------------------------ scanning
