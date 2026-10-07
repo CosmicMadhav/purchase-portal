@@ -286,3 +286,24 @@ def test_post_facto_switch_replaces_normal_permission(app_client):
     second = app_client.post(f"/api/generate/permission/{p['id']}", json={}).get_json()
     assert not any(os.path.exists(f) for f in old)
     assert [os.path.basename(f) for f in second["docs"][0]["files"]] == ["Post-facto Permission.docx", "Post-facto Permission.pdf"]
+
+
+def test_approved_but_unbought_permission_is_reserved_until_cash_voucher(app_client):
+    pid = store.all_("projects", "id ASC")[1]["id"]
+    store.save("projects", {**store.get("projects", pid), "provision": 50000, "opening_utilized": 0})
+    for k in [x for x in store.all_("ledger") if str(x.get("project_id")) == str(pid)]:
+        store.delete("ledger", k["id"])
+    for x in [x for x in store.all_("purchases") if str(x.get("project_id")) == str(pid)]:
+        store.delete("purchases", x["id"])
+    for x in [x for x in store.all_("reimbursements") if str(x.get("project_id")) == str(pid)]:
+        store.delete("reimbursements", x["id"])
+    p = app_client.post("/api/purchases", json={"project_id": pid, "date": "2026-07-01", "title": "Rivet Gun", "route": "personal",
+                        "quotes": [{"vendor": {"name": ""}, "items": [{"description": "Rivet Gun", "qty": 1, "rate": 3000, "gst": 0}]}],
+                        "stages": {"quotes": "2026-07-01", "permission_made": "2026-07-01", "permission_approved": "2026-07-02"}}).get_json()
+    b = app_client.get(f"/api/budget/{pid}").get_json()
+    assert b["utilized"] == 0 and b["reserved_total"] == 3000 and b["free"] == 47000 and b["available"] == 50000
+    c = app_client.post("/api/reimbursements", json={"project_id": pid, "date": "2026-10-07", "title": "Rivet gun bill", "purchase_id": str(p["id"]),
+                        "bills": [{"biller": "Shop", "bill_no": "1", "bill_date": "2026-10-06", "amount": 2950}]}).get_json()
+    assert app_client.post(f"/api/generate/cash_voucher/{c['id']}", json={}).status_code == 200
+    b = app_client.get(f"/api/budget/{pid}").get_json()
+    assert b["reserved_total"] == 0 and b["utilized"] == 2950 and b["free"] == 47050    # actual bill, not the approval

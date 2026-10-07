@@ -192,6 +192,17 @@ def budget_for(project_id, exclude=None):
         if (p.get("route") or "po") in ("po", "card") and (p.get("stages") or {}).get("permission_approved"):
             entries.append({"date": p.get("date"), "what": p.get("title"), "amount": r2(p.get("amount")),
                             "ref": f"purchases/{p['id']}"})
+    # approved permissions to be paid from own money / an advance: reserved until their voucher is made
+    settled_purchases = {str(c.get("purchase_id")) for c in store.all_("reimbursements")
+                         if (c.get("stages") or {}).get("voucher_made") and c.get("purchase_id")}
+    reserved = []
+    for p in store.all_("purchases", "id ASC"):
+        st = p.get("stages") or {}
+        if (str(p.get("project_id")) == str(project_id) and (p.get("route") or "po") in ("personal", "advance")
+                and st.get("permission_approved") and not st.get("settled") and str(p["id"]) not in settled_purchases
+                and exclude != ("purchases", p["id"])):
+            reserved.append({"date": p.get("date"), "what": p.get("title"), "amount": r2(p.get("amount")),
+                             "ref": f"purchases/{p['id']}"})
     for a in store.all_("advances", "id ASC"):
         if str(a.get("project_id")) != str(project_id) or exclude == ("advances", a["id"]):
             continue
@@ -213,9 +224,11 @@ def budget_for(project_id, exclude=None):
     provision = float(proj.get("provision") or 0)
     opening = float(proj.get("opening_utilized") or 0)
     utilized = r2(opening + sum(e["amount"] for e in entries))
+    reserved_total = r2(sum(e["amount"] for e in reserved))
     return {"provision": provision, "opening": opening, "opening_as_of": proj.get("opening_as_of"),
             "entries": entries, "utilized": utilized, "available": r2(provision - utilized),
-            "as_of": date.today().isoformat()}
+            "reserved": reserved, "reserved_total": reserved_total,
+            "free": r2(provision - utilized - reserved_total), "as_of": date.today().isoformat()}
 
 
 @app.get("/api/budget/<int:project_id>")
