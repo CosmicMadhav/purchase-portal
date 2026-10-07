@@ -114,11 +114,19 @@ function docsList(rec) {
     return h("div", { class: "doc", "data-t": "doc-" + d.kind },
       h("div", { class: "doc-top" }, h("b", {}, DOC_NAMES[d.kind] || d.kind), h("span", { class: "when" }, d.made.replace("T", " ").slice(0, 16)),
         S.settings.can_open_folder ? h("a", { class: "folder", onclick: () => api("/api/open-folder", { method: "POST", body: { path: d.files[0] } }) }, "Open folder") : null),
+      h("div", { class: "when", title: d.files[0] }, "Saved in " + docFolder(d.files[0])),
       Object.entries(groups).map(([name, files]) => h("div", { class: "doc-line" },
         h("span", { class: "doc-name" }, d.kind === "rfq" ? name.replace(/^Quotation Request - /, "") : ""),
         h("span", { class: "links" }, files.slice().sort((a, b) => (a.endsWith(".pdf") ? -1 : 0) - (b.endsWith(".pdf") ? -1 : 0))
           .map((f) => h("a", { title: base(f), onclick: () => open(f, d) }, f.split(".").pop().toUpperCase()))))));
   }));
+}
+function docFolder(f) {
+  // path inside the portal's output folder, written the Windows way: data\output\KISAN KAWACH\Purchase 2 - …
+  const norm = f.split("\\").join("/");
+  const i = norm.indexOf("/output/");
+  const rel = i >= 0 ? "data/output/" + norm.slice(i + 8) : norm;
+  return rel.split("/").slice(0, -1).join("\\");
 }
 function emptyState(text, btnLabel, onclick) {
   return h("div", { class: "empty" }, h("div", {}, text), btnLabel ? h("button", { class: "primary", onclick }, btnLabel) : null);

@@ -85,6 +85,7 @@ def get_settings():
         s[k + "_set"] = bool(s.get(k))
         s[k] = ""
     s["can_open_folder"] = hasattr(os, "startfile")
+    s["output_base"] = os.path.abspath(output_base())
     s["output_fixed"] = bool(os.environ.get("OUTPUT_DIR"))
     s["authority_names"] = AUTHORITY_NAMES
     s["stages"] = STAGES
@@ -103,6 +104,7 @@ def post_settings():
         d.pop(k + "_clear", None)
     d.pop("authority_names", None)
     d.pop("can_open_folder", None)
+    d.pop("output_base", None)
     d.pop("output_fixed", None)
     d.pop("stages", None)
     store.set_settings(d)
@@ -156,6 +158,7 @@ def del_(table, id_):
 # ------------------------------------------------------------------ rules / budget
 def enrich_purchase(p):
     s = store.get_settings()
+    p["title"] = clean_title(p.get("title"))
     q = selected_quote(p)
     t = quote_totals(q)
     p["amount"] = t["grand"]
@@ -280,16 +283,41 @@ def output_base():
     return os.environ.get("OUTPUT_DIR") or store.get_settings().get("output_dir") or os.path.join(HERE, "data", "output")
 
 
-def out_dir(project, sub):
-    base = output_base()
-    safe = lambda s: re.sub(r'[<>:"/\\|?*\n\r\t]+', " ", s or "").strip()[:80]
-    path = os.path.join(base, safe(project.get("name") or "Project"), safe(sub))
+def short(text, n):
+    """Safe for Windows file names, cut at a word boundary, no trailing dot/space."""
+    t = " ".join(re.sub(r'[<>:"/\\|?*\x00-\x1f]+', " ", text or "").split())
+    if len(t) > n:
+        t = t[:n].rsplit(" ", 1)[0] if " " in t[:n] else t[:n]
+    return t.rstrip(" .") or "Untitled"
+
+
+def clean_title(title):
+    """'Permission to purchase for Permission to Purchase X' -> 'X'."""
+    return re.sub(r"^\s*(subject\s*:\s*)?((permission\s+to\s+purchase|purchase\s+order)(\s+for)?\s*[:\-]?\s*)+",
+                  "", title or "", flags=re.I).strip()
+
+
+def record_dir(project, label, rec):
+    """One fixed folder per record, e.g. 'Purchase 2 - Electronics Components'. If the title changes,
+    the same folder is renamed, so old and new copies never sit in different places."""
+    proj_dir = os.path.join(output_base(), short(project.get("name") or "Project", 40))
+    os.makedirs(proj_dir, exist_ok=True)
+    prefix = f"{label} {rec['id']} - "
+    name = prefix + short(clean_title(rec.get("title")) or label, 45)
+    path = os.path.join(proj_dir, name)
+    for existing in os.listdir(proj_dir):
+        if existing.startswith(prefix) and existing != name:
+            try:
+                os.rename(os.path.join(proj_dir, existing), path)
+            except OSError:
+                path = os.path.join(proj_dir, existing)
+            break
     os.makedirs(path, exist_ok=True)
     return path
 
 
 def fname(*parts):
-    return re.sub(r'[<>:"/\\|?*\n\r\t]+', " ", " - ".join(p for p in parts if p)).strip()[:120]
+    return short(" - ".join(p for p in parts if p), 70)
 
 
 def file_entry(kind, *paths):
@@ -328,7 +356,16 @@ def _project(rec):
 
 
 def _push_doc(table, rec, entry):
+    """Record the new files and delete the previous version's files, so only the latest exists."""
     rec = store.get(table, rec["id"])
+    base = os.path.abspath(output_base())
+    for old in [x for x in rec.get("docs") or [] if x["kind"] == entry["kind"]]:
+        for f in old.get("files", []):
+            if f not in entry["files"] and os.path.abspath(f).startswith(base + os.sep) and os.path.exists(f):
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
     docs = [x for x in rec.get("docs") or [] if x["kind"] != entry["kind"]]
     docs.append(entry)
     rec["docs"] = docs
@@ -348,7 +385,7 @@ def generate(kind, id_):
         t = quote_totals(selected_quote(p))
         slab = slab_for(t["grand"], s["slabs"])
         nq = len(p.get("quotes") or [])
-        folder = out_dir(proj, fname(dmy(p.get("date")), p.get("title") or f"Purchase {id_}"))
+        folder = record_dir(proj, "Purchase", p)
         stages = p.setdefault("stages", {})
 
         if kind == "permission":
@@ -358,7 +395,7 @@ def generate(kind, id_):
                            f"you have {nq}. Add the quotations (or tick 'single source / waiver' if that "
                            f"applies).", 409)
             label = "Post-facto Permission" if p.get("post_facto") else "Purchase Permission"
-            path = build_permission(p, proj, os.path.join(folder, fname(label, p.get("title")) + ".docx"), s["slabs"])
+            path = build_permission(p, proj, os.path.join(folder, label + ".docx"), s["slabs"])
             pdf = docx_to_pdf(path)
             p = _push_doc("purchases", p, file_entry("permission", path, pdf))
             p.setdefault("stages", {})
@@ -373,7 +410,7 @@ def generate(kind, id_):
                 return err("Purchase Permission is not approved yet – the PO cannot be created. "
                            "Mark 'Permission approved' once it is signed.", 409)
             budget = budget_for(int(p["project_id"]), exclude=("purchases", p["id"]))
-            path = build_po(p, proj, os.path.join(folder, fname("Purchase Order", p.get("title")) + ".docx"),
+            path = build_po(p, proj, os.path.join(folder, "Purchase Order.docx"),
                             budget, s["slabs"])
             pdf = docx_to_pdf(path, smart_page_break=False)
             p = _push_doc("purchases", p, file_entry("po", path, pdf))
@@ -386,7 +423,7 @@ def generate(kind, id_):
                 v = q.get("vendor") or {}
                 if not v.get("name"):
                     continue
-                path = build_rfq(p, proj, v, os.path.join(folder, fname("Quotation Request", v["name"]) + ".docx"))
+                path = build_rfq(p, proj, v, os.path.join(folder, fname("Quotation Request", short(v["name"], 35)) + ".docx"))
                 files += [path, docx_to_pdf(path, smart_page_break=False)]
             if not files:
                 return err("Add the vendors (in the quotation cards) to send requests to.", 400)
@@ -398,10 +435,10 @@ def generate(kind, id_):
         if not a:
             return err("Save the advance first", 404)
         proj = _project(a)
-        folder = out_dir(proj, fname("Advance", dmy(a.get("date")), a.get("title")))
+        folder = record_dir(proj, "Advance", a)
         if kind == "advance_voucher":
             budget = budget_for(int(a["project_id"]), exclude=("advances", a["id"]))
-            base = os.path.join(folder, fname("Advance Voucher", a.get("title")))
+            base = os.path.join(folder, "Advance Voucher")
             build_advance_voucher(a, proj, budget, base + ".xlsx", base + ".pdf")
             a = _push_doc("advances", a, file_entry("advance_voucher", base + ".xlsx", base + ".pdf"))
             a.setdefault("stages", {}).setdefault("voucher_made", date.today().isoformat())
@@ -413,7 +450,7 @@ def generate(kind, id_):
             return err("Add the bills spent from this advance.", 400)
         budget = budget_for(int(a["project_id"]), exclude=("advances", a["id"]))
         adj = dict(a, date=a.get("adjust_date") or date.today().isoformat())
-        base = os.path.join(folder, fname("Advance Adjustment Voucher", a.get("title")))
+        base = os.path.join(folder, "Advance Adjustment Voucher")
         build_advance_adjustment(adj, proj, budget, base + ".xlsx", base + ".pdf")
         a = _push_doc("advances", a, file_entry("advance_adjustment", base + ".xlsx", base + ".pdf"))
         a["stages"].setdefault("adjustment_made", date.today().isoformat())
@@ -437,8 +474,8 @@ def generate(kind, id_):
         if not c.get("bills"):
             return err("Add the original bill(s).", 400)
         budget = budget_for(int(c["project_id"]), exclude=("reimbursements", c["id"]))
-        folder = out_dir(proj, fname("Reimbursement", dmy(c.get("date")), c.get("title")))
-        base = os.path.join(folder, fname("Cash Voucher", c.get("title")))
+        folder = record_dir(proj, "Reimbursement", c)
+        base = os.path.join(folder, "Cash Voucher")
         build_cash_voucher(dict(c, permission_ref=perm_ref), proj, budget, base + ".xlsx", base + ".pdf")
         c = _push_doc("reimbursements", c, file_entry("cash_voucher", base + ".xlsx", base + ".pdf"))
         c.setdefault("stages", {}).setdefault("voucher_made", date.today().isoformat())
@@ -451,8 +488,8 @@ def generate(kind, id_):
         if not c.get("bills"):
             return err("Add the bills the waiver is for.", 400)
         proj = _project(c)
-        folder = out_dir(proj, fname("Reimbursement", dmy(c.get("date")), c.get("title")))
-        path = build_waiver(c, proj, os.path.join(folder, fname("Waiver", c.get("title")) + ".docx"))
+        folder = record_dir(proj, "Reimbursement", c)
+        path = build_waiver(c, proj, os.path.join(folder, "Waiver.docx"))
         pdf = docx_to_pdf(path, smart_page_break=False)
         c = _push_doc("reimbursements", c, file_entry("waiver", path, pdf))
         return jsonify(store.save("reimbursements", c))

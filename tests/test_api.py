@@ -250,3 +250,39 @@ def test_post_facto_allows_fewer_quotes_and_waiver_and_backup(app_client):
     import io
     names = zipfile.ZipFile(io.BytesIO(z.data)).namelist()
     assert "data/portal.db" in names and any(n.endswith(".pdf") for n in names)
+
+
+def test_regenerate_after_changes_keeps_only_the_new_document(app_client):
+    """Madhav's case: generate, change details (even the subject), generate again."""
+    import pymupdf
+    p = purchase(app_client, title="Permission to purchase for Permission to Purchase Motor Drivers and Buck Converters")
+    assert p["title"] == "Motor Drivers and Buck Converters"                     # duplicate wording removed
+    first = app_client.post(f"/api/generate/permission/{p['id']}", json={}).get_json()
+    old_pdf = first["docs"][0]["files"][1]
+    folder = os.path.dirname(old_pdf)
+    assert os.path.basename(folder) == f"Purchase {p['id']} - Motor Drivers and Buck Converters"
+    assert os.path.basename(old_pdf) == "Purchase Permission.pdf"
+
+    p = first
+    p["title"] = "Motor drivers (revised)"
+    p["quotes"][0]["items"][0]["rate"] = 4321
+    app_client.post("/api/purchases", json=p)
+    second = app_client.post(f"/api/generate/permission/{p['id']}", json={}).get_json()
+    new_pdf = [d for d in second["docs"] if d["kind"] == "permission"][0]["files"][1]
+    assert os.path.basename(os.path.dirname(new_pdf)) == f"Purchase {p['id']} - Motor drivers (revised)"
+    assert not os.path.exists(folder)                                             # same folder, renamed
+    assert len(os.listdir(os.path.dirname(new_pdf))) == 2                          # only the new docx + pdf
+    text = "".join(pg.get_text() for pg in pymupdf.open(new_pdf))
+    assert "Rs. 4,321.00" in text and "Motor drivers (revised)" in text
+    assert len(new_pdf) < 200                                                     # far below Windows' 260 limit
+
+
+def test_post_facto_switch_replaces_normal_permission(app_client):
+    p = purchase(app_client)
+    first = app_client.post(f"/api/generate/permission/{p['id']}", json={}).get_json()
+    old = first["docs"][0]["files"]
+    first["post_facto"] = True
+    app_client.post("/api/purchases", json=first)
+    second = app_client.post(f"/api/generate/permission/{p['id']}", json={}).get_json()
+    assert not any(os.path.exists(f) for f in old)
+    assert [os.path.basename(f) for f in second["docs"][0]["files"]] == ["Post-facto Permission.docx", "Post-facto Permission.pdf"]
