@@ -26,6 +26,7 @@ async function api(path, opts = {}) {
   if (o.body && !(o.body instanceof FormData)) { o.headers["Content-Type"] = "application/json"; o.body = JSON.stringify(o.body); }
   const r = await fetch(path, o);
   const data = await r.json().catch(() => ({}));
+  if (r.status === 401) { location.href = "/login"; throw new Error("Login required"); }
   if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
 }
@@ -79,7 +80,7 @@ function fileLinks(doc) {
   return doc.files.map((f) => {
     const ext = f.split(".").pop().toUpperCase();
     return h("a", { onclick: () => window.open("/api/file?path=" + encodeURIComponent(f)) }, ext);
-  }).concat([h("a", { onclick: () => api("/api/open-folder", { method: "POST", body: { path: doc.files[0] } }) }, "Folder")]);
+  }).concat(S.settings.can_open_folder ? [h("a", { onclick: () => api("/api/open-folder", { method: "POST", body: { path: doc.files[0] } }) }, "Folder")] : []);
 }
 const DOC_NAMES = { permission: "Purchase Permission", po: "Purchase Order", rfq: "Quotation requests",
   advance_voucher: "Advance Voucher", advance_adjustment: "Advance Adjustment Voucher", cash_voucher: "Cash Voucher" };
@@ -619,7 +620,7 @@ views.settings = async () => {
         field("LLM provider", sel(s, "llm_provider", [["xai", "xAI Grok (api.x.ai)"], ["groq", "Groq (api.groq.com)"]])),
         field(`LLM API key ${s.llm_key_set ? "(saved – leave blank to keep)" : ""}`, inp(s, "llm_key", { type: "password", autocomplete: "off" })),
         field("Model (blank = default: grok-4 / openai/gpt-oss-120b)", inp(s, "llm_model")))),
-    h("div", { class: "panel" }, h("h2", {}, "Output folder"), field("Generated documents are saved under", inp(s, "output_dir"))),
+    h("div", { class: "panel" }, h("h2", {}, "Output folder"), s.output_fixed ? h("p", { class: "muted", style: "margin:0" }, "Running in Docker: documents are saved in the portal's data\output folder.") : field("Generated documents are saved under", inp(s, "output_dir"))),
     h("div", { class: "panel" }, h("h2", {}, "Purchase value rules"),
       h("p", { class: "muted", style: "margin-top:0" }, "Default: up to ₹3,000 → HOD; ₹3,001–10,000 → 3-party comparison, stays with HOD, PO (Tally + normal), no audit; ₹10,001–50,000 → Director, PO + Internal Audit + Outward; above ₹50,000 → VP."),
       slabsBox),

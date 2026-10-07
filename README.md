@@ -2,7 +2,16 @@
 
 Local web app that fills Madhav's own Nirma purchase formats.
 
-**Start:** double-click `start.bat` (opens http://127.0.0.1:5050). Needs Python + MS Word/Excel (already installed).
+## Run
+**With Docker (recommended):** `docker compose up -d` → open http://localhost:5050
+Everything (database, API keys, uploads, generated documents) stays in the local `data/` folder.
+The image is built by GitHub Actions on every push: `ghcr.io/cosmicmadhav/purchase-portal:latest`.
+Inside Docker the PDFs are made with LibreOffice (Liberation/Carlito fonts = same metrics as Times New Roman/Calibri).
+
+**Without Docker (Windows + MS Office):** `pip install -r requirements.txt`, then `start.bat`.
+PDFs are then exported by Word/Excel themselves.
+
+Set `APP_PASSWORD` (environment variable / `.env` next to docker-compose.yml) to require a login.
 
 ## What it makes
 | Document | Source format (in `doc_templates/`) |

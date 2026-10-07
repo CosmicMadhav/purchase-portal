@@ -1,0 +1,12 @@
+# Run:  docker compose up -d      then open http://localhost:5050
+services:
+  portal:
+    image: ghcr.io/cosmicmadhav/purchase-portal:latest
+    build: .
+    ports:
+      - "5050:5050"
+    volumes:
+      - ./data:/app/data          # database, keys, uploads and generated documents stay on your PC
+    environment:
+      - APP_PASSWORD=${APP_PASSWORD:-}   # optional: set to require a password
+    restart: unless-stopped

@@ -1,5 +1,7 @@
 flask
 python-docx
+openpyxl
+pillow
 pymupdf
-pywin32
 requests
+pywin32; sys_platform == "win32"

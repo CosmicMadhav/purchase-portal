@@ -38,6 +38,40 @@ def on_error(e):
     return err(f"{type(e).__name__}: {e}", 500)
 
 
+# ------------------------------------------------------------------ optional login (set APP_PASSWORD)
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(24)
+
+
+@app.before_request
+def require_login():
+    from flask import session, redirect
+    if not APP_PASSWORD or session.get("ok") or request.path in ("/login",):
+        return None
+    if request.path.startswith("/api/"):
+        return err("Login required", 401)
+    return redirect("/login")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    from flask import session, redirect
+    bad = ""
+    if request.method == "POST":
+        if request.form.get("password") == APP_PASSWORD:
+            session["ok"] = True
+            session.permanent = True
+            return redirect("/")
+        bad = "<p style='color:#a3262a'>Wrong password</p>"
+    return (f"<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><title>Purchase Portal</title>"
+            f"<body style='font:15px Segoe UI,sans-serif;display:grid;place-items:center;height:100vh;background:#f4f5f2;margin:0'>"
+            f"<form method=post style='background:#fff;padding:28px;border-radius:10px;border:1px solid #dfe3dd;width:300px'>"
+            f"<h2 style='margin-top:0'>Purchase Portal</h2>{bad}<input type=password name=password autofocus placeholder=Password "
+            f"style='width:100%;padding:9px;border:1px solid #dfe3dd;border-radius:6px;box-sizing:border-box'>"
+            f"<button style='margin-top:12px;width:100%;padding:9px;background:#2f6b45;color:#fff;border:0;border-radius:6px'>"
+            f"Open</button></form>")
+
+
 @app.get("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
@@ -50,6 +84,8 @@ def get_settings():
     for k in SECRET_KEYS:
         s[k + "_set"] = bool(s.get(k))
         s[k] = ""
+    s["can_open_folder"] = hasattr(os, "startfile")
+    s["output_fixed"] = bool(os.environ.get("OUTPUT_DIR"))
     s["authority_names"] = AUTHORITY_NAMES
     s["stages"] = STAGES
     return jsonify(s)
@@ -66,6 +102,8 @@ def post_settings():
         d.pop(k + "_set", None)
         d.pop(k + "_clear", None)
     d.pop("authority_names", None)
+    d.pop("can_open_folder", None)
+    d.pop("output_fixed", None)
     d.pop("stages", None)
     store.set_settings(d)
     return get_settings()
@@ -238,8 +276,12 @@ def mark_stage(table, id_):
 
 
 # ------------------------------------------------------------------ files
+def output_base():
+    return os.environ.get("OUTPUT_DIR") or store.get_settings().get("output_dir") or os.path.join(HERE, "data", "output")
+
+
 def out_dir(project, sub):
-    base = store.get_settings().get("output_dir") or os.path.join(HERE, "data", "output")
+    base = output_base()
     safe = lambda s: re.sub(r'[<>:"/\\|?*\n\r\t]+', " ", s or "").strip()[:80]
     path = os.path.join(base, safe(project.get("name") or "Project"), safe(sub))
     os.makedirs(path, exist_ok=True)
@@ -257,7 +299,7 @@ def file_entry(kind, *paths):
 @app.get("/api/file")
 def get_file():
     path = os.path.abspath(request.args.get("path", ""))
-    base = os.path.abspath(store.get_settings().get("output_dir") or os.path.join(HERE, "data", "output"))
+    base = os.path.abspath(output_base())
     allowed = [base, os.path.abspath(UPLOADS), os.path.abspath(os.path.join(HERE, "data", "output"))]
     if not any(path.startswith(a + os.sep) for a in allowed) or not os.path.exists(path):
         abort(404)
@@ -269,7 +311,7 @@ def open_folder():
     path = os.path.abspath((request.json or {}).get("path", ""))
     if os.path.isfile(path):
         path = os.path.dirname(path)
-    if os.path.isdir(path):
+    if os.path.isdir(path) and hasattr(os, "startfile"):
         os.startfile(path)
     return jsonify({"ok": True})
 
@@ -462,4 +504,4 @@ if __name__ == "__main__":
     if not os.environ.get("NO_BROWSER"):
         threading.Thread(target=_open_browser_when_ready, args=(url,), daemon=True).start()
     print(f"Purchase Portal running on {url}  (keep this window open; close it to stop)")
-    app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
+    app.run(host=os.environ.get("HOST", "127.0.0.1"), port=port, debug=False, threaded=True)
