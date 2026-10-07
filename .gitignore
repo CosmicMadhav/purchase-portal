@@ -1,0 +1,5 @@
+# local data: database (holds API keys), uploaded quotations/bills, generated output
+data/
+__pycache__/
+*.pyc
+~$*
