@@ -438,7 +438,28 @@ def scan():
     return jsonify(res)
 
 
+def _open_browser_when_ready(url):
+    import socket, time, webbrowser
+    for _ in range(60):
+        try:
+            socket.create_connection(("127.0.0.1", int(url.rsplit(":", 1)[1])), timeout=0.5).close()
+            webbrowser.open(url)
+            return
+        except OSError:
+            time.sleep(0.5)
+
+
 if __name__ == "__main__":
+    import socket, threading, webbrowser
     port = int(os.environ.get("PORT", 5050))
-    print(f"Purchase Portal running on http://127.0.0.1:{port}")
+    url = f"http://127.0.0.1:{port}"
+    try:  # already running (double-clicked twice)? just open the page
+        socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+        webbrowser.open(url)
+        raise SystemExit
+    except OSError:
+        pass
+    if not os.environ.get("NO_BROWSER"):
+        threading.Thread(target=_open_browser_when_ready, args=(url,), daemon=True).start()
+    print(f"Purchase Portal running on {url}  (keep this window open; close it to stop)")
     app.run(host="127.0.0.1", port=port, debug=False, threaded=True)

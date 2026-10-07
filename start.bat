@@ -1,4 +1,5 @@
-@echo off
-cd /d "%~dp0"
-start "" http://127.0.0.1:5050
-python app.py
+@echo off
+title Purchase Portal
+cd /d "%~dp0"
+python app.py
+if errorlevel 1 pause
